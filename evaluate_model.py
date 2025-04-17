@@ -3,10 +3,14 @@
 import os
 import sys
 import numpy as np
-from helper_code import load_patient_data, get_grade, load_challenge_outputs, compare_strings
-from sklearn.metrics import roc_auc_score, average_precision_score, f1_score, accuracy_score
+import matplotlib.pyplot as plt
+from sklearn.metrics import (
+    roc_auc_score, average_precision_score, f1_score,
+    accuracy_score, confusion_matrix, roc_curve, precision_recall_curve
+)
 
-# ✅ Function to find label and output files
+from helper_code import load_patient_data, get_grade, load_challenge_outputs, compare_strings
+
 def find_challenge_files(label_folder, output_folder):
     label_files, output_files = [], []
     for label_file in sorted(os.listdir(label_folder)):
@@ -18,171 +22,162 @@ def find_challenge_files(label_folder, output_folder):
                 label_files.append(label_file_path)
                 output_files.append(output_file_path)
             else:
-                print(f"⚠️ Warning: Missing output file for {label_file}")
+                print(f" Warning: Missing output file for {label_file}")
     return label_files, output_files
 
-# ✅ Function to load grade labels for "I/VI","II/VI","III/VI"
 def load_grades(label_files):
     valid_indices, labels = [], []
-    included_labels = ["I/VI","II/VI","III/VI"]  # Defined within function to match original structure
-    
+    included_labels = ["I/VI", "II/VI", "III/VI"]
     for i, file in enumerate(label_files):
         data = load_patient_data(file)
-        label = get_grade(data)  # Extract murmur grade
-        
+        label = get_grade(data)
         if label in included_labels:
-            labels.append([int(label == "I/VI"), int(label == "II/VI"), int(label == "III/VI")])
+            labels.append([
+                int(label == "I/VI"),
+                int(label == "II/VI"),
+                int(label == "III/VI")
+            ])
             valid_indices.append(i)
-    
     return np.array(labels, dtype=int), valid_indices
 
-# ✅ Function to load classifier outputs for "I/VI","II/VI","III/VI"
 def load_classifier_outputs(output_files, valid_indices):
     binary_outputs, scalar_outputs = [], []
-    included_labels = ["I/VI","II/VI","III/VI"]  # Defined within function to match original structure
-    
+    included_labels = ["I/VI", "II/VI", "III/VI"]
     filtered_output_files = [output_files[i] for i in valid_indices]
-    
     for file in filtered_output_files:
         _, patient_classes, _, patient_scalar_outputs = load_challenge_outputs(file)
-        
-        binary_output = [0, 0, 0]  # Default (all classes 0)
-        scalar_output = [0.0, 0.0, 0.0]  # Default probabilities
-        
+        binary_output = [0, 0, 0]
+        scalar_output = [0.0, 0.0, 0.0]
         for j, x in enumerate(included_labels):
             for k, y in enumerate(patient_classes):
                 if compare_strings(x, y):
                     scalar_output[j] = patient_scalar_outputs[k]
-                    binary_output[j] = int(patient_scalar_outputs[k] >= 0.5)  # Default threshold
-        
+                    binary_output[j] = int(patient_scalar_outputs[k] >= 0.5)
         binary_outputs.append(binary_output)
         scalar_outputs.append(scalar_output)
-    
     return np.array(binary_outputs, dtype=int), np.array(scalar_outputs, dtype=np.float64)
 
-# ✅ Compute the best threshold using F1-score
-
-# ✅ Compute evaluation metrics for "I/VI","II/VI","III/VI"
 def compute_auc(labels, outputs):
     try:
-        auroc_grade_one = roc_auc_score(labels[:, 0], outputs[:, 0])
-        auprc_grade_one = average_precision_score(labels[:, 0], outputs[:, 0])
-
-        auroc_grade_two = roc_auc_score(labels[:, 1], outputs[:, 1])
-        auprc_grade_two = average_precision_score(labels[:, 1], outputs[:, 1])
-
-        auroc_grade_three = roc_auc_score(labels[:, 2], outputs[:, 2])
-        auprc_grade_three = average_precision_score(labels[:, 2], outputs[:, 2])
+        aucs = [roc_auc_score(labels[:, i], outputs[:, i]) for i in range(3)]
+        prcs = [average_precision_score(labels[:, i], outputs[:, i]) for i in range(3)]
     except ValueError:
-        auroc_grade_one, auprc_grade_one = 0.5, 0.5
-        auroc_grade_two, auprc_grade_two = 0.5, 0.5
-        auroc_grade_three, auprc_grade_three = 0.5, 0.5
+        aucs = [0.5, 0.5, 0.5]
+        prcs = [0.5, 0.5, 0.5]
+    return aucs, prcs
 
-    return (auroc_grade_one, auprc_grade_one, auroc_grade_two, auprc_grade_two, auroc_grade_three, auprc_grade_three)
-
-# ✅ Compute F-measure (F1-score) for "I/VI","II/VI","III/VI"
 def compute_f_measure(labels, outputs):
-    f1_grade_one = f1_score(labels[:, 0], outputs[:, 0])
-    f1_grade_two = f1_score(labels[:, 1], outputs[:, 1])
-    f1_grade_three = f1_score(labels[:, 2], outputs[:, 2])
+    scores = [f1_score(labels[:, i], outputs[:, i]) for i in range(3)]
+    return np.mean(scores), scores
 
-    return np.mean([f1_grade_one, f1_grade_two, f1_grade_three]), [f1_grade_one, f1_grade_two, f1_grade_three]
-
-# ✅ Compute accuracy for "I/VI","II/VI","III/VI"
 def compute_accuracy(labels, outputs):
-    accuracy_grade_one = accuracy_score(labels[:, 0], outputs[:, 0])
-    accuracy_grade_two = accuracy_score(labels[:, 1], outputs[:, 1])
-    accuracy_grade_three = accuracy_score(labels[:, 2], outputs[:, 2])
+    scores = [accuracy_score(labels[:, i], outputs[:, i]) for i in range(3)]
+    return np.mean(scores), scores
 
-    return np.mean([accuracy_grade_one, accuracy_grade_two, accuracy_grade_three]), [accuracy_grade_one, accuracy_grade_two, accuracy_grade_three]
-
-# ✅ Compute weighted accuracy for "I/VI","II/VI","III/VI"
 def compute_weighted_accuracy(labels, outputs):
-    # Define a custom weight matrix for three classes
-    weights = np.array([
-        [5, 2, 1],  # I/VI
-        [2, 5, 1],  # II/VI
-        [1, 2, 5]   # III/VI
-    ])
-
-    # Initialize the confusion matrix for three classes
+    weights = np.array([[2, 1, 1], [1, 3, 1], [1, 1, 3]])
     confusion = np.zeros((3, 3))
-
     for i in range(len(labels)):
-        true_class = np.argmax(labels[i])   # Find the true class index
-        pred_class = np.argmax(outputs[i])  # Find the predicted class index
-        confusion[pred_class, true_class] += 1  # Update confusion matrix
+        true_class = np.argmax(labels[i])
+        pred_class = np.argmax(outputs[i])
+        confusion[pred_class, true_class] += 1
+    return np.trace(weights * confusion) / np.sum(weights * confusion)
 
-    # Compute weighted accuracy
-    weighted_acc = np.trace(weights * confusion) / np.sum(weights * confusion)
+#  Visualizations
+def generate_visualizations_multiclass(true_onehot, predicted_probs, class_names=["I/VI", "II/VI", "III/VI"], output_dir='plots'):
+    os.makedirs(output_dir, exist_ok=True)
 
-    return weighted_acc
+    y_true = np.argmax(true_onehot, axis=1)
+    y_pred = np.argmax(predicted_probs, axis=1)
 
+    # ROC Curve
+    fpr, tpr, _ = roc_curve(true_onehot.ravel(), predicted_probs.ravel())
+    plt.figure()
+    plt.plot(fpr, tpr, label="Overall ROC")
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("Overall ROC Curve")
+    plt.grid()
+    plt.legend()
+    plt.savefig(os.path.join(output_dir, "overall_roc.png"))
+    plt.close()
 
-# ✅ Main evaluation function (Modified for "I/VI","II/VI","III/VI")
+    # PR Curve
+    precision, recall, _ = precision_recall_curve(true_onehot.ravel(), predicted_probs.ravel())
+    plt.figure()
+    plt.plot(recall, precision, label="Overall PR")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title("Overall Precision-Recall Curve")
+    plt.grid()
+    plt.legend()
+    plt.savefig(os.path.join(output_dir, "overall_pr.png"))
+    plt.close()
+
+    # Confusion Matrix
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure()
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title('Confusion Matrix - Multiclass')
+    plt.colorbar()
+    tick_marks = np.arange(len(class_names))
+    plt.xticks(tick_marks, class_names)
+    plt.yticks(tick_marks, class_names)
+    for i in range(len(class_names)):
+        for j in range(len(class_names)):
+            plt.text(j, i, str(cm[i, j]), ha='center', va='center', color='black')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.savefig(os.path.join(output_dir, "overall_confusion_matrix_multiclass.png"))
+    plt.close()
+
+#  Main evaluation function
 def evaluate_model(label_folder, output_folder):
     print("🔍 Evaluating model...")
-
-    # Load label & output files
     label_files, output_files = find_challenge_files(label_folder, output_folder)
-    grade_labels, valid_indices = load_grades(label_files)  # Updated to load_grades
+    grade_labels, valid_indices = load_grades(label_files)
     grade_binary_outputs, grade_scalar_outputs = load_classifier_outputs(output_files, valid_indices)
 
-    # Find best threshold
     threshold = 0.5
-
-    # Apply threshold
     grade_binary_outputs = (grade_scalar_outputs >= threshold).astype(int)
 
-    # Compute evaluation metrics
-    auroc_grade_one, auprc_grade_one, auroc_grade_two, auprc_grade_two, auroc_grade_three, auprc_grade_three = compute_auc(grade_labels, grade_scalar_outputs)
-    grade_f_measure, grade_f_measure_classes = compute_f_measure(grade_labels, grade_binary_outputs)
-    grade_accuracy, grade_accuracy_classes = compute_accuracy(grade_labels, grade_binary_outputs)
-    grade_weighted_accuracy = compute_weighted_accuracy(grade_labels, grade_binary_outputs)
+    class_names = ["I/VI", "II/VI", "III/VI"]
+    generate_visualizations_multiclass(grade_labels, grade_scalar_outputs, class_names)
 
-    return ["I/VI","II/VI","III/VI"], \
-           [auroc_grade_one, auroc_grade_two, auroc_grade_three], \
-           [auprc_grade_one, auprc_grade_two, auprc_grade_three], \
-           grade_f_measure, grade_f_measure_classes, \
-           grade_accuracy, grade_accuracy_classes, grade_weighted_accuracy
+    aurocs, auprcs = compute_auc(grade_labels, grade_scalar_outputs)
+    f_measure, f_classes = compute_f_measure(grade_labels, grade_binary_outputs)
+    accuracy, acc_classes = compute_accuracy(grade_labels, grade_binary_outputs)
+    weighted_acc = compute_weighted_accuracy(grade_labels, grade_binary_outputs)
 
-# ✅ Print & Save scores (Modified for "I/VI","II/VI","III/VI")
+    return class_names, aurocs, auprcs, f_measure, f_classes, accuracy, acc_classes, weighted_acc
+
+#  Save scores
 def print_and_save_scores(filename, grade_scores):
     classes, auroc, auprc, f_measure, f_measure_classes, accuracy, accuracy_classes, weighted_accuracy = grade_scores
-    
-    # Compute the overall AUROC and AUPRC as the mean of all classes
-    total_auroc = np.mean(auroc)
-    total_auprc = np.mean(auprc)
-
     output_string = f"""
-#grade scores
+#Grade scores
 AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy
-{total_auroc:.3f},{total_auprc:.3f},{f_measure:.3f},{accuracy:.3f},{weighted_accuracy:.3f}
+{np.mean(auroc):.3f},{np.mean(auprc):.3f},{f_measure:.3f},{accuracy:.3f},{weighted_accuracy:.3f}
 
-#grade scores (per class)
+#Grade scores (per class)
 Classes,I/VI,II/VI,III/VI
 AUROC,{auroc[0]:.3f},{auroc[1]:.3f},{auroc[2]:.3f}
 AUPRC,{auprc[0]:.3f},{auprc[1]:.3f},{auprc[2]:.3f}
 F-measure,{f_measure_classes[0]:.3f},{f_measure_classes[1]:.3f},{f_measure_classes[2]:.3f}
 Accuracy,{accuracy_classes[0]:.3f},{accuracy_classes[1]:.3f},{accuracy_classes[2]:.3f}
 """
-
-    # ✅ Print results to console
     print(output_string)
-
-    # ✅ Save to file
     with open(filename, 'w') as f:
         f.write(output_string.strip())
     print(f"✅ Scores saved to {filename}")
 
-# ✅ Run the evaluation script
+#  Entry point
 if __name__ == '__main__':
     if len(sys.argv) < 4:
-        print("Usage: python evaluate_model.py <label_folder> <output_folder> <scores.csv>")
+        print("Usage: python evaluate_model_grade.py <label_folder> <output_folder> <scores.csv>")
         sys.exit(1)
 
     grade_scores = evaluate_model(sys.argv[1], sys.argv[2])
     print_and_save_scores(sys.argv[3], grade_scores)
-
-    print("✅ Model Evaluation Completed. Check scores.csv for detailed results.")
-
+    print(" Model Evaluation Completed. Check scores.csv and plots/ folder for visualizations.")

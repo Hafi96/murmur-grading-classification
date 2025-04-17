@@ -68,9 +68,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if verbose:
             print('\n')
         save_challenge_model(model_folder, grade_classifier, file_name='grade_classifier')
-        
-    # Stage 2: Train the classifier for Outcome classification
- 
+    
         
     if verbose:
         print('Done.')
@@ -144,7 +142,7 @@ def recording_grade_diagnose(multi_scale_specs, grade_classifier, systolic_murmu
 
 @torch.no_grad()
 def run_challenge_model(model, data, recordings, verbose):
-    (device, preprocessor, grade_classifier, systolic_murmur_class) = model  # Removed outcome-related components
+    (device, preprocessor, grade_classifier, systolic_murmur_class) = model  
     interval = 1.0
     recording_grade_counts = np.zeros(len(systolic_murmur_class), dtype=np.int_)
 

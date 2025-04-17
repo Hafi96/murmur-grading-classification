@@ -4,7 +4,7 @@ import torch
 from helper_code import find_patient_files, load_patient_data, get_num_locations, get_locations, get_grade, load_wav_file
 from helper_code import compare_strings, get_age, get_sex, get_height, get_weight, get_pregnancy_status
 
-# Updated mappings to remove "Unknown" and outcome-related labels
+
 grade_mapping_str2int = {'I/VI': 0, 'II/VI': 1,'III/VI': 2}
 grade_mapping_int2str = {0: 'I/VI', 1: 'II/VI',2: 'III/VI'}
 
